@@ -1,0 +1,26 @@
+/* 1. リセット */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 2. ルート設定（フォントのみ） */
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 3. body 最小限設定 */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  /* ⚠️ display: flex, place-items: center は記載しない（MUIと競合） */
+}
+
+/* 4. レイアウトは layouts/ のコンポーネント内で実装 */
+/* 5. 背景色・テキスト色は theme/palette.ts で管理 */
