@@ -1,0 +1,407 @@
+// AIAgentStudio-X Database Schema
+// Prisma ORM v5+
+// PostgreSQL 14+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//
+// ========================================
+// Prompts Management
+// ========================================
+//
+
+/// プロンプトマスターテーブル
+/// 各フェーズのアクティブなプロンプトを管理
+model Prompt {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// フェーズ識別子（ユニーク制約）
+  phase String @unique @db.VarChar(50)
+
+  /// プロンプトタイトル
+  title String @db.VarChar(255)
+
+  /// プロンプト本文（Markdown）
+  content String @db.Text
+
+  /// メタデータ（JSON形式）
+  /// 例: { "author": "admin", "tags": ["requirements"], "estimatedMinutes": 10 }
+  metadata Json? @db.JsonB
+
+  /// バージョン番号（自動インクリメント）
+  version Int @default(1)
+
+  /// アクティブフラグ
+  isActive Boolean @default(true)
+
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  /// 更新日時
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  /// 作成者（メールアドレス）
+  createdBy String @db.VarChar(255)
+
+  /// リレーション: バージョン履歴
+  versions PromptVersion[]
+
+  @@index([phase])
+  @@index([isActive])
+  @@index([updatedAt])
+  @@map("prompts")
+}
+
+/// プロンプトバージョン履歴テーブル
+/// プロンプトの全変更履歴を保存
+model PromptVersion {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// 親プロンプトID
+  promptId String @db.Uuid
+
+  /// バージョン番号
+  version Int
+
+  /// このバージョンのプロンプト本文
+  content String @db.Text
+
+  /// このバージョンのメタデータ
+  metadata Json? @db.JsonB
+
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  /// 作成者
+  createdBy String @db.VarChar(255)
+
+  /// リレーション: 親プロンプト
+  prompt Prompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  /// ユニーク制約: promptId + version
+  @@unique([promptId, version])
+  @@index([promptId])
+  @@index([createdAt])
+  @@map("prompt_versions")
+}
+
+//
+// ========================================
+// User Management
+// ========================================
+//
+
+/// ユーザーテーブル
+/// 管理者アカウント情報
+model User {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// メールアドレス（ユニーク）
+  email String @unique @db.VarChar(255)
+
+  /// パスワードハッシュ（bcrypt）
+  passwordHash String @db.VarChar(255)
+
+  /// ロール
+  role String @default("admin") @db.VarChar(50)
+
+  /// APIキー（VS Code拡張・MCPサーバー用）
+  /// 例: cli_mk8n3p_a302ae96bc54d1789ef23456
+  apiKey String? @unique @db.VarChar(255)
+
+  /// アカウント作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  /// 最終ログイン日時
+  lastLoginAt DateTime? @db.Timestamptz
+
+  /// リレーション: セッション
+  sessions Session[]
+
+  @@index([email])
+  @@index([apiKey])
+  @@map("users")
+}
+
+/// セッションテーブル
+/// JWT管理（将来的なトークン無効化に対応）
+model Session {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// ユーザーID
+  userId String @db.Uuid
+
+  /// JWTトークン（ハッシュ化）
+  tokenHash String @db.VarChar(255)
+
+  /// 有効期限
+  expiresAt DateTime @db.Timestamptz
+
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  /// リレーション: ユーザー
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([tokenHash])
+  @@map("sessions")
+}
+
+//
+// ========================================
+// Activity Logging (Optional)
+// ========================================
+//
+
+/// アクティビティログテーブル（オプション）
+/// 管理者操作やAPI使用状況の監査ログ
+model ActivityLog {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// アクション種別
+  /// 例: "prompt.created", "prompt.updated", "auth.login"
+  action String @db.VarChar(100)
+
+  /// 実行者（メールアドレスまたはAPIキー）
+  actor String @db.VarChar(255)
+
+  /// 対象リソース種別
+  /// 例: "prompt", "user", "session"
+  resourceType String? @db.VarChar(50)
+
+  /// 対象リソースID
+  resourceId String? @db.Uuid
+
+  /// 詳細データ（JSON）
+  details Json? @db.JsonB
+
+  /// IPアドレス
+  ipAddress String? @db.VarChar(45)
+
+  /// User Agent
+  userAgent String? @db.Text
+
+  /// タイムスタンプ
+  timestamp DateTime @default(now()) @db.Timestamptz
+
+  @@index([action])
+  @@index([actor])
+  @@index([timestamp])
+  @@index([resourceType, resourceId])
+  @@map("activity_logs")
+}
+
+//
+// ========================================
+// Sync Management (Optional)
+// ========================================
+//
+
+/// 同期履歴テーブル（オプション）
+/// VS Code拡張とクラウド間の同期履歴
+model SyncHistory {
+  /// UUID主キー
+  id String @id @default(uuid()) @db.Uuid
+
+  /// クライアント識別子（APIキー）
+  clientId String @db.VarChar(255)
+
+  /// 同期方向
+  /// "pull": クラウド→ローカル
+  /// "push": ローカル→クラウド
+  direction String @db.VarChar(10)
+
+  /// 同期ステータス
+  /// "success", "partial", "failed"
+  status String @db.VarChar(20)
+
+  /// 処理件数
+  itemsProcessed Int @default(0)
+
+  /// エラーメッセージ
+  error String? @db.Text
+
+  /// 同期開始時刻
+  startedAt DateTime @default(now()) @db.Timestamptz
+
+  /// 同期完了時刻
+  completedAt DateTime? @db.Timestamptz
+
+  @@index([clientId])
+  @@index([startedAt])
+  @@index([status])
+  @@map("sync_histories")
+}
+
+//
+// ========================================
+// Database Functions & Triggers
+// ========================================
+//
+
+// Note: Prisma does not support custom functions/triggers directly
+// These should be created via raw SQL in migration files
+
+/*
+-- Example: Auto-increment version on prompt update
+-- migrations/XXXXXX_create_version_trigger.sql
+
+CREATE OR REPLACE FUNCTION increment_prompt_version()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.content IS DISTINCT FROM NEW.content THEN
+    NEW.version = OLD.version + 1;
+
+    -- Insert into prompt_versions
+    INSERT INTO prompt_versions (
+      id,
+      prompt_id,
+      version,
+      content,
+      metadata,
+      created_at,
+      created_by
+    ) VALUES (
+      gen_random_uuid(),
+      NEW.id,
+      NEW.version,
+      NEW.content,
+      NEW.metadata,
+      NOW(),
+      NEW.created_by
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER prompt_version_trigger
+BEFORE UPDATE ON prompts
+FOR EACH ROW
+EXECUTE FUNCTION increment_prompt_version();
+*/
+
+//
+// ========================================
+// Initial Data Seeds
+// ========================================
+//
+
+// Example seed data (run with: npx prisma db seed)
+// See: prisma/seed.ts
+
+/*
+import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  // Create default admin user
+  const adminPassword = await bcrypt.hash('admin123', 10);
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@example.com' },
+    update: {},
+    create: {
+      email: 'admin@example.com',
+      passwordHash: adminPassword,
+      role: 'admin',
+      apiKey: 'cli_mk8n3p_a302ae96bc54d1789ef23456'
+    }
+  });
+
+  // Create default prompts
+  const phases = [
+    {
+      phase: 'phase0',
+      title: 'Phase 0: Requirements & Technical Design',
+      content: '# Phase 0: 要件定義・技術設計\n\n...'
+    },
+    {
+      phase: 'phase1',
+      title: 'Phase 1: Design System',
+      content: '# Phase 1: デザインシステム構築\n\n...'
+    },
+    {
+      phase: 'phase2',
+      title: 'Phase 2: Mock Data Generation',
+      content: '# Phase 2: モックデータ生成\n\n...'
+    },
+    {
+      phase: 'phase3',
+      title: 'Phase 3: Mockup Implementation',
+      content: '# Phase 3: モックアップ実装\n\n...'
+    },
+    {
+      phase: 'phase4',
+      title: 'Phase 4: Quality Check',
+      content: '# Phase 4: 品質チェック\n\n...'
+    }
+  ];
+
+  for (const phase of phases) {
+    await prisma.prompt.upsert({
+      where: { phase: phase.phase },
+      update: {},
+      create: {
+        ...phase,
+        createdBy: admin.email,
+        metadata: {
+          version: 1,
+          auto_generated: true
+        }
+      }
+    });
+  }
+
+  console.log('Seed data created successfully');
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+*/
+
+//
+// ========================================
+// Performance Optimization
+// ========================================
+//
+
+// Recommended PostgreSQL extensions:
+// - pgvector: 将来的なベクトル検索（プロンプト類似性検索）
+// - pg_trgm: 全文検索の高速化
+
+/*
+-- Enable extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+-- Full-text search index
+CREATE INDEX idx_prompts_content_fts ON prompts
+  USING gin(to_tsvector('english', content));
+
+-- Trigram index for fuzzy search
+CREATE INDEX idx_prompts_title_trgm ON prompts
+  USING gin(title gin_trgm_ops);
+*/

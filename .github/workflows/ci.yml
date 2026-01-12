@@ -1,0 +1,167 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  quality-check:
+    name: 品質チェック
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Build check
+        run: npm run build
+
+      - name: 🔍 Type check
+        run: npx tsc --noEmit
+
+      - name: ✨ Lint (with complexity check)
+        run: npm run lint
+
+      - name: 🧪 Test
+        run: npm test -- --passWithNoTests --coverage
+
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.node-version == '20.x'
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  security-check:
+    name: セキュリティチェック
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+
+      - name: 🔒 Run npm audit
+        run: npm audit --audit-level=moderate
+
+      - name: 🔍 Check for outdated dependencies
+        run: npm outdated || true
+
+  monorepo-check:
+    name: モノレポ構造チェック
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Check workspace structure
+        run: |
+          echo "Checking monorepo workspace structure..."
+          npm ls --workspaces --depth=0 || true
+
+      - name: 🔍 Validate package.json files
+        run: |
+          echo "Validating package.json files..."
+          find . -name "package.json" -not -path "*/node_modules/*" -exec cat {} \; | jq empty
+
+  frontend-check:
+    name: フロントエンド個別チェック
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Build admin app
+        run: npm run build --workspace=apps/admin
+        if: hashFiles('apps/admin/package.json') != ''
+
+      - name: 🔨 Build extension
+        run: npm run build --workspace=apps/extension
+        if: hashFiles('apps/extension/package.json') != ''
+
+  backend-check:
+    name: バックエンド個別チェック
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔨 Build API
+        run: npm run build --workspace=apps/api
+        if: hashFiles('apps/api/package.json') != ''
+
+      - name: 🧪 Test API
+        run: npm test --workspace=apps/api
+        if: hashFiles('apps/api/package.json') != ''
+
+  all-checks-passed:
+    name: ✅ All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [quality-check, security-check, monorepo-check, frontend-check, backend-check]
+    if: always()
+
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [[ "${{ needs.quality-check.result }}" == "success" ]] && \
+             [[ "${{ needs.security-check.result }}" == "success" ]] && \
+             [[ "${{ needs.monorepo-check.result }}" == "success" ]] && \
+             [[ "${{ needs.frontend-check.result }}" == "success" ]] && \
+             [[ "${{ needs.backend-check.result }}" == "success" ]]; then
+            echo "✅ All checks passed successfully!"
+            exit 0
+          else
+            echo "❌ Some checks failed"
+            exit 1
+          fi

@@ -1,0 +1,735 @@
+openapi: 3.0.3
+info:
+  title: AIAgentStudio-X Cloud API
+  description: |
+    AIAgentStudio-X のクラウドAPI仕様書
+
+    プロンプト管理、認証、同期機能を提供します。
+  version: 1.0.0
+  contact:
+    name: AIAgentStudio-X Team
+    email: support@aiagentstudio.example.com
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.aiagentstudio.example.com/api/v1
+    description: Production server
+  - url: http://localhost:3000/api/v1
+    description: Development server
+
+tags:
+  - name: auth
+    description: 認証関連エンドポイント
+  - name: prompts
+    description: プロンプト管理
+  - name: sync
+    description: 同期機能
+  - name: health
+    description: ヘルスチェック
+
+paths:
+  /health:
+    get:
+      summary: ヘルスチェック
+      tags: [health]
+      responses:
+        '200':
+          description: サーバーが正常に稼働中
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: 1.0.0
+
+  /auth/login:
+    post:
+      summary: ログイン
+      tags: [auth]
+      description: 管理者用ログイン（JWT発行）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@example.com
+                password:
+                  type: string
+                  format: password
+                  example: SecureP@ssw0rd
+      responses:
+        '200':
+          description: ログイン成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 認証失敗
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      summary: トークンリフレッシュ
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 新しいトークン発行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: 無効なトークン
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      summary: ログアウト
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: ログアウト成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Logged out successfully
+
+  /prompts:
+    get:
+      summary: プロンプト一覧取得
+      tags: [prompts]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: phase
+          in: query
+          description: フェーズでフィルタ
+          schema:
+            type: string
+            enum: [phase0, phase1, phase2, phase3, phase4]
+        - name: isActive
+          in: query
+          description: アクティブ状態でフィルタ
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          description: 取得件数
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: オフセット
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: プロンプト一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Prompt'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: プロンプト作成
+      tags: [prompts]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptDto'
+      responses:
+        '201':
+          description: プロンプト作成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prompt'
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 同じphaseのプロンプトが既に存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /prompts/{phase}:
+    get:
+      summary: フェーズ別プロンプト取得
+      tags: [prompts]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: phase
+          in: path
+          required: true
+          description: フェーズ名
+          schema:
+            type: string
+            enum: [phase0, phase1, phase2, phase3, phase4]
+      responses:
+        '200':
+          description: プロンプト取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prompt'
+        '404':
+          description: プロンプトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /prompts/{id}:
+    get:
+      summary: プロンプト詳細取得
+      tags: [prompts]
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: プロンプトID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: プロンプト詳細
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prompt'
+        '404':
+          description: プロンプトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: プロンプト更新
+      tags: [prompts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: プロンプトID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePromptDto'
+      responses:
+        '200':
+          description: プロンプト更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prompt'
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: プロンプトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: プロンプト削除（論理削除）
+      tags: [prompts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: プロンプトID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: プロンプト削除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Prompt deleted successfully
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: プロンプトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /prompts/{id}/versions:
+    get:
+      summary: プロンプトバージョン履歴取得
+      tags: [prompts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: プロンプトID
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          description: 取得件数
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: オフセット
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: バージョン履歴
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PromptVersion'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /prompts/{id}/versions/{version}:
+    get:
+      summary: 特定バージョンのプロンプト取得
+      tags: [prompts]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: プロンプトID
+          schema:
+            type: string
+            format: uuid
+        - name: version
+          in: path
+          required: true
+          description: バージョン番号
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: バージョン取得成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersion'
+        '404':
+          description: バージョンが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /sync/pull:
+    post:
+      summary: クラウド→ローカル同期
+      tags: [sync]
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lastSyncAt:
+                  type: string
+                  format: date-time
+                  description: 前回同期日時（差分取得用）
+      responses:
+        '200':
+          description: 同期データ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPullResponse'
+
+  /sync/push:
+    post:
+      summary: ローカル→クラウド同期
+      tags: [sync]
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CreatePromptDto'
+      responses:
+        '200':
+          description: 同期成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPushResponse'
+
+  /sync/status:
+    get:
+      summary: 同期ステータス確認
+      tags: [sync]
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: 同期ステータス
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lastSyncAt:
+                    type: string
+                    format: date-time
+                  pendingChanges:
+                    type: integer
+                  status:
+                    type: string
+                    enum: [synced, pending, error]
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 管理者用JWT認証
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: VS Code拡張・MCPサーバー用APIキー認証
+
+  schemas:
+    Prompt:
+      type: object
+      required:
+        - id
+        - phase
+        - title
+        - content
+        - version
+        - isActive
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        phase:
+          type: string
+          enum: [phase0, phase1, phase2, phase3, phase4]
+          example: phase0
+        title:
+          type: string
+          example: 'Phase 0: Requirements & Technical Design'
+        content:
+          type: string
+          example: '# Phase 0: 要件定義・技術設計\n\n...'
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+          example:
+            author: admin
+            tags: ['requirements', 'design']
+        version:
+          type: integer
+          minimum: 1
+          example: 3
+        isActive:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          example: admin@example.com
+
+    PromptVersion:
+      type: object
+      required:
+        - id
+        - promptId
+        - version
+        - content
+        - createdAt
+        - createdBy
+      properties:
+        id:
+          type: string
+          format: uuid
+        promptId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        content:
+          type: string
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    CreatePromptDto:
+      type: object
+      required:
+        - phase
+        - title
+        - content
+      properties:
+        phase:
+          type: string
+          enum: [phase0, phase1, phase2, phase3, phase4]
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    UpdatePromptDto:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+        isActive:
+          type: boolean
+
+    AuthResponse:
+      type: object
+      required:
+        - accessToken
+        - user
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        refreshToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        expiresIn:
+          type: integer
+          example: 604800
+          description: トークン有効期限（秒）
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+              format: email
+            role:
+              type: string
+              example: admin
+
+    SyncPullResponse:
+      type: object
+      properties:
+        prompts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Prompt'
+        syncedAt:
+          type: string
+          format: date-time
+        hasMore:
+          type: boolean
+
+    SyncPushResponse:
+      type: object
+      properties:
+        created:
+          type: integer
+          description: 作成されたプロンプト数
+        updated:
+          type: integer
+          description: 更新されたプロンプト数
+        failed:
+          type: integer
+          description: 失敗したプロンプト数
+        syncedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required:
+        - statusCode
+        - message
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Validation failed
+        error:
+          type: string
+          example: Bad Request
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
